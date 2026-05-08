@@ -1,0 +1,83 @@
+{
+  "schema": "receipt_chain_core.adversarial_vectors.v0.1",
+  "issued_at": "2026-05-08T09:00:00Z",
+  "vectors": [
+    {
+      "id": "V01_clean_chain_of_three_verifies_ok",
+      "kind": "clean_chain",
+      "actions": [
+        {"action_type": "send_email", "object_id": "msg-0"},
+        {"action_type": "publish_post", "object_id": "post-1"},
+        {"action_type": "rotate_key", "object_id": "kek-2"}
+      ],
+      "expected_chain_status": "OK",
+      "expected_final_verdict": "ALLOW"
+    },
+    {
+      "id": "V02_mutation_breaks_chain",
+      "kind": "tamper_mutation",
+      "seed_actions": [
+        {"action_type": "send_email", "object_id": "msg-0"},
+        {"action_type": "send_email", "object_id": "msg-1"}
+      ],
+      "mutate_index": 0,
+      "mutate_field": "reason",
+      "mutate_value": "ALTERED",
+      "expected_status_in": ["BROKEN_HASH", "BROKEN_LINK"]
+    },
+    {
+      "id": "V03_removal_breaks_chain",
+      "kind": "tamper_removal",
+      "seed_actions": [
+        {"action_type": "send_email", "object_id": "msg-0"},
+        {"action_type": "send_email", "object_id": "msg-1"},
+        {"action_type": "send_email", "object_id": "msg-2"}
+      ],
+      "remove_index": 1,
+      "expected_status": "BROKEN_SEQUENCE"
+    },
+    {
+      "id": "V04_reorder_breaks_chain",
+      "kind": "tamper_reorder",
+      "seed_actions": [
+        {"action_type": "send_email", "object_id": "msg-0"},
+        {"action_type": "send_email", "object_id": "msg-1"},
+        {"action_type": "send_email", "object_id": "msg-2"}
+      ],
+      "swap": [1, 2],
+      "expected_status": "BROKEN_SEQUENCE"
+    },
+    {
+      "id": "V05_recent_refusal_changes_verdict",
+      "kind": "verdict_under_state",
+      "seed_refusal_for": {"action_type": "send_email", "object_id": "msg-A"},
+      "proposed_action": {"action_type": "send_email", "object_id": "msg-A"},
+      "expected_verdict": "HOLD",
+      "expected_reason_code": "chain.recent_refusal_in_window"
+    },
+    {
+      "id": "V06_unresolved_rebind_blocks_then_clears",
+      "kind": "rebind_cycle",
+      "object_id": "obj-R",
+      "block_action": {"action_type": "send_email", "object_id": "obj-R"},
+      "expected_blocked_verdict": "REBIND_REQUIRED",
+      "expected_after_rebind_verdict": "ALLOW"
+    },
+    {
+      "id": "V07_replay_is_deterministic",
+      "kind": "determinism",
+      "actions": [
+        {"action_type": "send_email", "object_id": "msg-0"},
+        {"action_type": "send_email", "object_id": "msg-1"}
+      ],
+      "issued_at": "2026-05-08T09:00:00Z",
+      "expected": "byte_equal_receipts_across_two_chains"
+    },
+    {
+      "id": "V08_boundary_declarations_present",
+      "kind": "boundary_declaration",
+      "expected_keys": ["does_not_execute", "does_not_bind_consequence"],
+      "expected_values": [true, true]
+    }
+  ]
+}

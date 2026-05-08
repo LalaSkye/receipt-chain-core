@@ -1,0 +1,53 @@
+{
+  "all_pass": true,
+  "boundary_declaration": {
+    "does_not_bind_consequence": true,
+    "does_not_execute": true
+  },
+  "issued_at": "2026-05-08T09:41:48.760875Z",
+  "receipt_hash": "cbf74261622b4c07dde332983249cf170aa1a9c745bbc58625d9df1cb9b3166b",
+  "results": [
+    {
+      "id": "V01_clean_chain_of_three_verifies_ok",
+      "pass": true
+    },
+    {
+      "id": "V02_mutation_breaks_chain",
+      "pass": true,
+      "status": "BROKEN_HASH"
+    },
+    {
+      "id": "V03_removal_breaks_chain",
+      "pass": true,
+      "status": "BROKEN_SEQUENCE"
+    },
+    {
+      "id": "V04_reorder_breaks_chain",
+      "pass": true,
+      "status": "BROKEN_SEQUENCE"
+    },
+    {
+      "id": "V05_recent_refusal_changes_verdict",
+      "pass": true,
+      "reason_code": "chain.recent_refusal_in_window",
+      "verdict": "HOLD"
+    },
+    {
+      "blocked": "REBIND_REQUIRED",
+      "cleared": "ALLOW",
+      "id": "V06_unresolved_rebind_blocks_then_clears",
+      "pass": true
+    },
+    {
+      "id": "V07_replay_is_deterministic",
+      "pass": true
+    },
+    {
+      "id": "V08_boundary_declarations_present",
+      "pass": true
+    }
+  ],
+  "schema": "receipt_chain_core.verification_receipt.v0.1",
+  "vector_count": 8,
+  "vectors_path": "tests/adversarial/INVARIANT_TEST_VECTORS_v1.json"
+}
