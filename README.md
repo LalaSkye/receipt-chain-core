@@ -51,6 +51,8 @@ The invariant is `FROZEN` for v0.1.
   rebind receipt is appended.
 - Replay is deterministic: same chain + same head + same proposed action →
   same verdict.
+- A high replay attempt count within the window can change today's verdict
+  on the demonstrated path.
 
 ---
 
@@ -192,6 +194,7 @@ receipt-chain-core/
 │   ├── test_tamper_detection.py
 │   ├── test_prior_state_projector.py
 │   ├── test_verdict_changes_under_chain_state.py
+│   ├── test_replay_suppression.py
 │   └── adversarial/
 │       ├── INVARIANT_TEST_VECTORS_v1.json
 │       └── test_invariants.py
@@ -212,6 +215,8 @@ This repo may claim only:
 - tampering, removal, or reordering breaks chain verification
 - a recent refusal or unresolved rebind can change today's verdict on the
   demonstrated path
+- a high replay attempt count within the window can change today's verdict
+  on the demonstrated path
 
 This repo must not claim:
 

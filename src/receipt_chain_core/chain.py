@@ -15,6 +15,11 @@ from .receipt import ChainedReceipt
 from .verdict import ChainStatus, Verdict
 
 
+# Number of matching attempts within the refusal window that triggers
+# replay suppression. Evaluated after tamper/rebind/refusal checks.
+REPLAY_SUPPRESS_THRESHOLD: int = 3
+
+
 @dataclass
 class Chain:
     """An ordered sequence of ChainedReceipts.
@@ -112,7 +117,15 @@ class Chain:
 def _decide(
     proposed_action: Mapping[str, Any], state: ProjectedState
 ) -> Tuple[Verdict, str, str]:
-    """The four-row ladder defined in docs/prior-state-projector.md."""
+    """The five-row ladder.
+
+    Evaluation order (FIRST_FAIL):
+        1. tamper detection
+        2. unresolved rebind
+        3. recent refusal
+        4. replay suppression  (Issue #1: replay_attempt_count now active)
+        5. clean allow
+    """
     if state.chain_status != ChainStatus.OK and state.chain_status != ChainStatus.EMPTY:
         return (
             Verdict.HOLD,
@@ -130,6 +143,15 @@ def _decide(
             Verdict.HOLD,
             "chain.recent_refusal_in_window",
             f"recent refusal at sequence {state.recent_refusal['sequence']}",
+        )
+    # Issue #1: make replay_attempt_count decision-active.
+    # If the same proposed action has appeared >= REPLAY_SUPPRESS_THRESHOLD
+    # times within the refusal window, suppress further attempts.
+    if state.replay_attempt_count >= REPLAY_SUPPRESS_THRESHOLD:
+        return (
+            Verdict.HOLD,
+            "chain.replay_suppressed",
+            f"replay attempt count {state.replay_attempt_count} reached threshold {REPLAY_SUPPRESS_THRESHOLD}",
         )
     return (
         Verdict.ALLOW,
