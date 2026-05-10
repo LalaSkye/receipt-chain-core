@@ -8,26 +8,40 @@ Provides:
     to_refusal_receipt            — project a ChainedReceipt -> refusal receipt dict
     validate_refusal_receipt      — validate a refusal receipt dict shape (shape only)
     verify_refusal_receipt_hash   — validate shape + check receipt_hash consistency
+    sign_refusal_receipt          — sign a refusal receipt body with Ed25519 (optional)
+    verify_refusal_receipt_signature — verify Ed25519 signature over receipt body (optional)
 
 Proves:
     receipt-chain-core can project a refusal-class ChainedReceipt into a
-    typed refusal receipt shape, validate that shape, and detect post-projection
-    mutation by recomputing and checking receipt_hash on demonstrated paths.
+    typed refusal receipt shape, validate that shape, detect post-projection
+    mutation by recomputing and checking receipt_hash, and optionally verify
+    an Ed25519 signature over the canonical receipt body on demonstrated paths.
 
 Does not prove:
-    Cryptographic signature, authorship identity, legal admissibility,
-    production readiness, path-universal coverage, or full runtime governance
-    fabric.
+    Legal identity, human authority, institutional authority, legal admissibility,
+    production security, compliance, adoption, field standard, or full runtime
+    governance fabric.
 
-Open follow-up:
-    Issue #8 — Add optional signature verification for refusal receipts.
+Signature fields (optional, v0.1):
+    signature           — base64url-encoded Ed25519 signature over canonical signing body
+    signature_algorithm — fixed value "Ed25519"
+    public_key_id       — optional caller-supplied key identifier string
+
+PRIMARY DESIGN RULE:
+    Hash before signature.
+    Verification order: validate_refusal_receipt -> verify_refusal_receipt_hash ->
+    verify_refusal_receipt_signature.
+
+Dependency:
+    cryptography (Ed25519 via hazmat.primitives.asymmetric.ed25519)
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping
+import base64
+from typing import Any, Dict, Mapping, Optional
 
-from .hashing import sha256_hex
+from .hashing import canonical_json, sha256_hex
 from .receipt import ChainedReceipt
 from .verdict import Verdict
 
@@ -59,9 +73,18 @@ _REQUIRED_FIELDS = (
 # receipt_hash is excluded — it is the hash of everything else.
 _BODY_FIELDS = tuple(f for f in _REQUIRED_FIELDS if f != "receipt_hash")
 
+# Signature fields are optional. They are excluded from the canonical signing body
+# so that signing does not change the hash and unsigned receipts remain valid.
+_SIGNATURE_FIELDS = ("signature", "signature_algorithm", "public_key_id")
+
+# All known fields = required + optional signature fields
+_ALL_KNOWN_FIELDS = frozenset(_REQUIRED_FIELDS) | frozenset(_SIGNATURE_FIELDS)
+
 _REFUSAL_VERDICT_VALUES: frozenset[str] = frozenset(
     v.value for v in REFUSAL_VERDICTS
 )
+
+_SIGNATURE_ALGORITHM = "Ed25519"
 
 
 def to_refusal_receipt(receipt: ChainedReceipt) -> Dict[str, Any]:
@@ -70,6 +93,7 @@ def to_refusal_receipt(receipt: ChainedReceipt) -> Dict[str, Any]:
     Raises ValueError if the receipt verdict is ALLOW.
     The returned dict matches the schema at schemas/refusal-receipt.schema.json.
     receipt_hash is the SHA-256 of the canonical JSON of all body fields.
+    Returned dict contains no signature fields (unsigned v0.1 receipt).
     """
     if receipt.verdict not in REFUSAL_VERDICTS:
         raise ValueError(
@@ -90,8 +114,6 @@ def to_refusal_receipt(receipt: ChainedReceipt) -> Dict[str, Any]:
         "does_not_bind_consequence": receipt.does_not_bind_consequence,
     }
     # receipt_hash is derived from the body, not forwarded from ChainedReceipt.
-    # This ensures the refusal receipt hash reflects the refusal receipt body,
-    # not the underlying chain receipt hash.
     body["receipt_hash"] = sha256_hex({k: body[k] for k in _BODY_FIELDS})
     return body
 
@@ -99,30 +121,21 @@ def to_refusal_receipt(receipt: ChainedReceipt) -> Dict[str, Any]:
 def validate_refusal_receipt(data: Mapping[str, Any]) -> bool:
     """Validate a refusal receipt dict against the required shape.
 
-    Shape validation only — does not check hash consistency.
+    Shape validation only — does not check hash consistency or signature.
     For hash consistency, call verify_refusal_receipt_hash().
+    For signature, call verify_refusal_receipt_signature().
+
+    Accepts both unsigned receipts (no signature fields) and signed receipts
+    (signature + signature_algorithm required together; public_key_id optional).
 
     Returns True for a valid shape.
     Raises ValueError for any structural violation.
-
-    Checks:
-    - All required fields present
-    - No extra fields
-    - schema == REFUSAL_RECEIPT_SCHEMA_ID
-    - receipt_type == 'refusal_receipt'
-    - verdict is a refusal-class value
-    - receipt_hash is a non-empty string
-    - prior_chain_state_hash is None or a non-empty string
-    - does_not_execute is True
-    - does_not_bind_consequence is True
-    - proposed_action contains action_type and object_id
     """
     if not isinstance(data, Mapping):
         raise ValueError("refusal receipt must be a mapping")
 
-    # Check for extra fields first — fail-closed on unknown shape
-    known_fields = set(_REQUIRED_FIELDS)
-    extra = set(data.keys()) - known_fields
+    # Check for extra fields — fail-closed on unknown shape
+    extra = set(data.keys()) - _ALL_KNOWN_FIELDS
     if extra:
         raise ValueError(f"refusal receipt contains unexpected fields: {sorted(extra)}")
 
@@ -182,6 +195,29 @@ def validate_refusal_receipt(data: Mapping[str, Any]) -> bool:
                 f"proposed_action.{key} must be a non-empty string"
             )
 
+    # Signature field consistency: if any signature field present, both
+    # signature and signature_algorithm must be present together.
+    has_sig = "signature" in data
+    has_alg = "signature_algorithm" in data
+    if has_sig != has_alg:
+        raise ValueError(
+            "signature and signature_algorithm must both be present or both absent"
+        )
+    if has_sig:
+        if not isinstance(data["signature"], str) or not data["signature"]:
+            raise ValueError("signature must be a non-empty string")
+        if data["signature_algorithm"] != _SIGNATURE_ALGORITHM:
+            raise ValueError(
+                f"signature_algorithm must be {_SIGNATURE_ALGORITHM!r}, "
+                f"got {data['signature_algorithm']!r}"
+            )
+        if "public_key_id" in data:
+            pk_id = data["public_key_id"]
+            if pk_id is not None and (not isinstance(pk_id, str) or not pk_id):
+                raise ValueError(
+                    "public_key_id must be None or a non-empty string"
+                )
+
     return True
 
 
@@ -197,19 +233,133 @@ def verify_refusal_receipt_hash(data: Mapping[str, Any]) -> bool:
 
     This detects post-projection mutation of any body field.
     It does not verify cryptographic signatures.
-    See Issue #8 for signature verification.
+    Call verify_refusal_receipt_signature() for signature verification.
     """
-    # Shape check first — raises ValueError on any structural violation
     validate_refusal_receipt(data)
 
-    # Re-derive hash from body fields
     body = {k: data[k] for k in _BODY_FIELDS}
     expected_hash = sha256_hex(body)
 
     if data["receipt_hash"] != expected_hash:
         raise ValueError(
-            f"receipt_hash mismatch: stored hash does not match canonical body. "
-            f"The receipt may have been mutated after projection."
+            "receipt_hash mismatch: stored hash does not match canonical body. "
+            "The receipt may have been mutated after projection."
         )
+
+    return True
+
+
+def _canonical_signing_body(data: Mapping[str, Any]) -> bytes:
+    """Return the canonical UTF-8 bytes of the signing body.
+
+    The signing body is the canonical JSON of all fields excluding
+    signature, signature_algorithm, and public_key_id.
+    This ensures the signing body is identical for unsigned and signed receipts
+    and that re-signing produces the same bytes.
+    """
+    body = {k: v for k, v in data.items() if k not in _SIGNATURE_FIELDS}
+    return canonical_json(body).encode("utf-8")
+
+
+def sign_refusal_receipt(
+    data: Mapping[str, Any],
+    private_key: Any,
+    public_key_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Sign a refusal receipt body with an Ed25519 private key.
+
+    Verification order (PRIMARY DESIGN RULE — hash before signature):
+        1. validate_refusal_receipt(data)
+        2. verify_refusal_receipt_hash(data)
+        3. sign canonical body bytes with Ed25519
+
+    Args:
+        data:          A valid, hash-verified refusal receipt dict (unsigned or signed).
+        private_key:   An Ed25519PrivateKey instance from the cryptography library.
+        public_key_id: Optional caller-supplied key identifier string.
+
+    Returns:
+        A new dict — original is not mutated — containing all original fields
+        plus signature, signature_algorithm, and (if supplied) public_key_id.
+        signature is base64url-encoded (no padding) per RFC 7515.
+
+    Raises:
+        ValueError if shape is invalid or hash does not match.
+    """
+    # Step 1 & 2: shape then hash (PRIMARY DESIGN RULE)
+    validate_refusal_receipt(data)
+    verify_refusal_receipt_hash(data)
+
+    # Step 3: sign canonical body (excludes signature fields)
+    signing_bytes = _canonical_signing_body(data)
+    raw_signature: bytes = private_key.sign(signing_bytes)
+    signature_b64 = base64.urlsafe_b64encode(raw_signature).rstrip(b"=").decode("ascii")
+
+    # Build new dict — do not mutate original
+    signed: Dict[str, Any] = dict(data)
+    signed["signature"] = signature_b64
+    signed["signature_algorithm"] = _SIGNATURE_ALGORITHM
+    if public_key_id is not None:
+        signed["public_key_id"] = public_key_id
+    return signed
+
+
+def verify_refusal_receipt_signature(
+    data: Mapping[str, Any],
+    public_key: Any,
+) -> bool:
+    """Verify the Ed25519 signature over a refusal receipt canonical body.
+
+    Verification order (PRIMARY DESIGN RULE — hash before signature):
+        1. validate_refusal_receipt(data)
+        2. verify_refusal_receipt_hash(data)
+        3. verify Ed25519 signature over canonical signing body
+
+    Args:
+        data:       A signed refusal receipt dict.
+        public_key: An Ed25519PublicKey instance from the cryptography library.
+
+    Returns:
+        True if signature is present, well-formed, and valid.
+
+    Raises:
+        ValueError if:
+            - shape is invalid
+            - hash does not match
+            - signature field is missing
+            - signature is not valid base64url
+            - signature does not verify (wrong key, mutated body, or forgery)
+    """
+    from cryptography.exceptions import InvalidSignature
+
+    # Step 1 & 2: shape then hash (PRIMARY DESIGN RULE)
+    validate_refusal_receipt(data)
+    verify_refusal_receipt_hash(data)
+
+    # Step 3: require signature fields
+    if "signature" not in data:
+        raise ValueError(
+            "signature field is missing; call sign_refusal_receipt() first. "
+            "verify_refusal_receipt_signature() does not replace "
+            "verify_refusal_receipt_hash()."
+        )
+
+    # Decode base64url signature
+    sig_str: str = data["signature"]
+    try:
+        # Restore padding for base64 decode
+        padded = sig_str + "=" * (4 - len(sig_str) % 4) if len(sig_str) % 4 else sig_str
+        raw_signature = base64.urlsafe_b64decode(padded)
+    except Exception as exc:
+        raise ValueError(f"signature is not valid base64url: {exc}") from exc
+
+    # Verify over canonical signing body
+    signing_bytes = _canonical_signing_body(data)
+    try:
+        public_key.verify(raw_signature, signing_bytes)
+    except InvalidSignature as exc:
+        raise ValueError(
+            "signature verification failed: wrong key, mutated body, or forged receipt"
+        ) from exc
 
     return True
