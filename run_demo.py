@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """run_demo.py — receipt-chain-core demonstration.
 
-Six scenarios, one summary line each. No dependencies beyond stdlib.
+Seven scenarios, one summary line each. No dependencies beyond stdlib.
 """
 
 from __future__ import annotations
@@ -21,6 +21,11 @@ from receipt_chain_core import (  # noqa: E402
     evaluate,
 )
 from receipt_chain_core.chain import REPLAY_SUPPRESS_THRESHOLD  # noqa: E402
+from receipt_chain_core.refusal_receipt import (  # noqa: E402
+    to_refusal_receipt,
+    validate_refusal_receipt,
+    verify_refusal_receipt_hash,
+)
 
 
 ISSUED = "2026-05-08T09:00:00Z"
@@ -110,18 +115,75 @@ def _scenario_replay_suppression() -> tuple[str, str, str]:
     return ("replay suppression at threshold", r.verdict.value, r.reason_code)
 
 
+def _scenario_refusal_receipt_hash_check() -> tuple[str, str, str]:
+    """Scenario 7: refusal receipt hash-consistency check.
+
+    Projects a DENY ChainedReceipt as a typed refusal receipt.
+    Shape validation passes. Hash verification passes.
+    Mutates reason_code. Hash verification raises ValueError.
+    Demo row confirms the mutation was caught.
+
+    Proves: the refusal receipt proof surface (shape + hash) is visible
+    in this runnable path.
+
+    Does not prove: cryptographic signature, authorship identity,
+    legal admissibility, production readiness.
+    """
+    chain = Chain()
+    deny_receipt = ChainedReceipt.build(
+        sequence=0,
+        prev_receipt_hash=None,
+        decision_id="d-refusal-demo",
+        proposed_action={"action_type": "write", "object_id": "obj-demo"},
+        verdict=Verdict.DENY,
+        reason_code="policy.deny",
+        reason="demo refusal",
+        issued_at=ISSUED,
+    )
+
+    projected = to_refusal_receipt(deny_receipt)
+
+    # Shape must be valid
+    assert validate_refusal_receipt(projected) is True
+    # Hash must be consistent before mutation
+    assert verify_refusal_receipt_hash(projected) is True
+
+    # Mutate reason_code — hash is now stale
+    projected["reason_code"] = "MUTATED_REASON_CODE"
+
+    # Shape still passes (shape cannot detect this)
+    assert validate_refusal_receipt(projected) is True
+
+    # Hash verification must raise ValueError
+    mutation_caught = False
+    try:
+        verify_refusal_receipt_hash(projected)
+    except ValueError:
+        mutation_caught = True
+
+    if not mutation_caught:
+        raise AssertionError("hash mismatch was not caught — demo failed")
+
+    return (
+        "refusal receipt hash check",
+        "HOLD",
+        "refusal_receipt.hash_mismatch_caught",
+    )
+
+
 def main() -> int:
     print("=" * 74)
     print("  receipt-chain-core — demo (yesterday's receipt changes today's door)")
     print("=" * 74)
     print()
     expected = [
-        (_scenario_clean(),                  "ALLOW"),
-        (_scenario_recent_refusal(),         "HOLD"),
-        (_scenario_unresolved_rebind(),      "REBIND_REQUIRED"),
-        (_scenario_rebind_clears(),          "ALLOW"),
-        (_scenario_tampered(),               "HOLD"),
-        (_scenario_replay_suppression(),     "HOLD"),
+        (_scenario_clean(),                        "ALLOW"),
+        (_scenario_recent_refusal(),               "HOLD"),
+        (_scenario_unresolved_rebind(),            "REBIND_REQUIRED"),
+        (_scenario_rebind_clears(),                "ALLOW"),
+        (_scenario_tampered(),                     "HOLD"),
+        (_scenario_replay_suppression(),           "HOLD"),
+        (_scenario_refusal_receipt_hash_check(),   "HOLD"),
     ]
     all_match = True
     for (label, verdict, reason_code), expected_verdict in expected:

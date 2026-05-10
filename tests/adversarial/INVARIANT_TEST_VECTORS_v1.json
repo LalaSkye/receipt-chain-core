@@ -86,6 +86,19 @@
       "seed_count": 3,
       "expected_verdict": "HOLD",
       "expected_reason_code": "chain.replay_suppressed"
+    },
+    {
+      "id": "V10_refusal_receipt_hash_consistency",
+      "kind": "refusal_receipt_hash_consistency",
+      "seed_action": {"action_type": "write", "object_id": "obj-refusal"},
+      "verdict": "DENY",
+      "mutation": {
+        "field": "reason_code",
+        "value": "MUTATED_REASON_CODE"
+      },
+      "expected_shape_valid": true,
+      "expected_hash_valid_before_mutation": true,
+      "expected_hash_failure_after_mutation": true
     }
   ]
 }
