@@ -1,6 +1,7 @@
 """Tests for optional Ed25519 signature verification over refusal receipts.
 
 Issue #8 — Add optional signature verification for refusal receipts.
+Crack-patch — PR #13: schema/code sync and dependency declaration.
 
 Tests:
     1.  Unsigned refusal receipt passes shape validation.
@@ -13,6 +14,8 @@ Tests:
     8.  Missing signature fails only when signature verification is requested.
     9.  sign_refusal_receipt does not mutate original receipt dict.
     10. Signature verification does not replace hash verification.
+    11. public_key_id alone (no signature) raises ValueError.
+    12. Signed receipt conforms to JSON Schema (jsonschema optional).
 
 Design rule:
     Hash before signature.
@@ -21,6 +24,8 @@ Design rule:
 Proves:
     receipt-chain-core can optionally verify an Ed25519 signature over a typed
     refusal receipt body on demonstrated paths.
+    Schema and Python validator are consistent for unsigned and signed receipts.
+    Signature dependency path is explicit.
 
 Does not prove:
     Legal identity, human authority, institutional authority, legal admissibility,
@@ -32,6 +37,11 @@ from __future__ import annotations
 
 import copy
 import pytest
+
+cryptography = pytest.importorskip(
+    "cryptography",
+    reason="cryptography package required for signature tests (pip install receipt-chain-core[signature])",
+)
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
@@ -116,7 +126,6 @@ def test_signed_receipt_fails_with_wrong_key(unsigned_refusal_receipt, ed25519_k
     private_key, _ = ed25519_keypair
     signed = sign_refusal_receipt(unsigned_refusal_receipt, private_key)
 
-    # Generate an unrelated key pair
     wrong_private_key = Ed25519PrivateKey.generate()
     wrong_public_key = wrong_private_key.public_key()
 
@@ -133,13 +142,8 @@ def test_signed_receipt_fails_after_reason_code_mutation(unsigned_refusal_receip
     private_key, public_key = ed25519_keypair
     signed = sign_refusal_receipt(unsigned_refusal_receipt, private_key)
 
-    # Mutate reason_code in a copy — also need to recompute receipt_hash
-    # to pass the hash check and reach the signature check.
-    # If we mutate only reason_code without updating receipt_hash, the hash
-    # check will catch it first. Both paths (hash or signature) must fail.
     mutated = dict(signed)
     mutated["reason_code"] = "MUTATED_CODE"
-    # receipt_hash still matches old body — hash check fires first
     with pytest.raises(ValueError):
         verify_refusal_receipt_signature(mutated, public_key)
 
@@ -155,7 +159,6 @@ def test_signed_receipt_fails_after_proposed_action_mutation(unsigned_refusal_re
 
     mutated = dict(signed)
     mutated["proposed_action"] = {"action_type": "delete", "object_id": "file://other.csv"}
-    # receipt_hash still reflects old body — hash check fires first
     with pytest.raises(ValueError):
         verify_refusal_receipt_signature(mutated, public_key)
 
@@ -166,7 +169,7 @@ def test_signed_receipt_fails_after_proposed_action_mutation(unsigned_refusal_re
 
 def test_signature_catches_body_mutation_independent_of_hash(unsigned_refusal_receipt, ed25519_keypair):
     """Test 6b: if an attacker recomputes receipt_hash after mutation,
-    signature verification still fails — the signature covers the original body.
+    signature verification still fails.
     """
     from receipt_chain_core.hashing import sha256_hex
     from receipt_chain_core.refusal_receipt import _BODY_FIELDS
@@ -174,14 +177,11 @@ def test_signature_catches_body_mutation_independent_of_hash(unsigned_refusal_re
     private_key, public_key = ed25519_keypair
     signed = sign_refusal_receipt(unsigned_refusal_receipt, private_key)
 
-    # Attacker mutates reason_code and recomputes receipt_hash
     mutated = dict(signed)
     mutated["reason_code"] = "ATTACKER_CODE"
-    # Recompute receipt_hash so hash check passes
     body_for_hash = {k: mutated[k] for k in _BODY_FIELDS}
     mutated["receipt_hash"] = sha256_hex(body_for_hash)
 
-    # Hash check passes (attacker recomputed it), but signature should fail
     with pytest.raises(ValueError, match="signature verification failed"):
         verify_refusal_receipt_signature(mutated, public_key)
 
@@ -191,7 +191,7 @@ def test_signature_catches_body_mutation_independent_of_hash(unsigned_refusal_re
 # ---------------------------------------------------------------------------
 
 def test_malformed_signature_fails(unsigned_refusal_receipt, ed25519_keypair):
-    """Test 7: a receipt with a malformed (not-base64url) signature raises ValueError."""
+    """Test 7: a receipt with a malformed signature raises ValueError."""
     private_key, public_key = ed25519_keypair
     signed = sign_refusal_receipt(unsigned_refusal_receipt, private_key)
 
@@ -210,11 +210,9 @@ def test_missing_signature_only_fails_for_signature_verification(unsigned_refusa
     """Test 8: unsigned receipt passes shape + hash checks but fails signature check."""
     _, public_key = ed25519_keypair
 
-    # Shape and hash pass fine
     assert validate_refusal_receipt(unsigned_refusal_receipt) is True
     assert verify_refusal_receipt_hash(unsigned_refusal_receipt) is True
 
-    # Signature check raises because signature is missing
     with pytest.raises(ValueError, match="signature field is missing"):
         verify_refusal_receipt_signature(unsigned_refusal_receipt, public_key)
 
@@ -231,11 +229,8 @@ def test_sign_does_not_mutate_original(unsigned_refusal_receipt, ed25519_keypair
 
     signed = sign_refusal_receipt(unsigned_refusal_receipt, private_key)
 
-    # Original is unchanged
     assert set(unsigned_refusal_receipt.keys()) == original_keys
     assert unsigned_refusal_receipt == original_copy
-
-    # Signed is a different object with signature fields
     assert signed is not unsigned_refusal_receipt
     assert "signature" in signed
     assert "signature_algorithm" in signed
@@ -247,23 +242,81 @@ def test_sign_does_not_mutate_original(unsigned_refusal_receipt, ed25519_keypair
 # ---------------------------------------------------------------------------
 
 def test_signature_does_not_replace_hash_verification(unsigned_refusal_receipt, ed25519_keypair):
-    """Test 10: verify_refusal_receipt_signature calls hash check internally;
-    a receipt with a valid signature but corrupted receipt_hash still fails.
-    """
+    """Test 10: a receipt with a valid signature but corrupted receipt_hash still fails."""
     private_key, public_key = ed25519_keypair
     signed = sign_refusal_receipt(unsigned_refusal_receipt, private_key)
 
-    # Corrupt receipt_hash in a copy
     corrupted = dict(signed)
-    corrupted["receipt_hash"] = "0" * 64  # wrong hash, same length
+    corrupted["receipt_hash"] = "0" * 64
 
-    # hash check fires inside verify_refusal_receipt_signature before signature check
     with pytest.raises(ValueError, match="receipt_hash mismatch"):
         verify_refusal_receipt_signature(corrupted, public_key)
 
 
 # ---------------------------------------------------------------------------
-# Test bonus: public_key_id is preserved and optional
+# Test 11: public_key_id alone (no signature) raises ValueError
+# Crack-patch: closes the public_key_id-alone shape gap.
+# ---------------------------------------------------------------------------
+
+def test_public_key_id_alone_raises(unsigned_refusal_receipt):
+    """Test 11: public_key_id present without signature and signature_algorithm
+    must raise ValueError.
+
+    Rule: public_key_id is a label, not identity proof.
+    It is allowed only on signed receipts.
+    An unsigned receipt with only public_key_id set is a malformed shape.
+    """
+    malformed = dict(unsigned_refusal_receipt)
+    malformed["public_key_id"] = "key-2026-05-10"
+    # No signature, no signature_algorithm — this must be rejected
+    with pytest.raises(
+        ValueError,
+        match="public_key_id is only allowed on signed receipts",
+    ):
+        validate_refusal_receipt(malformed)
+
+
+# ---------------------------------------------------------------------------
+# Test 12: Signed receipt conforms to JSON Schema (jsonschema optional)
+# Crack-patch: proves schema/code consistency for signed receipts.
+# ---------------------------------------------------------------------------
+
+def test_signed_receipt_conforms_to_json_schema(unsigned_refusal_receipt, ed25519_keypair):
+    """Test 12: a signed refusal receipt passes JSON Schema validation.
+
+    Requires jsonschema. Skipped automatically if not installed.
+    This test proves that the JSON Schema (schemas/refusal-receipt.schema.json)
+    and the Python validator (validate_refusal_receipt) are consistent:
+    both accept signed receipts.
+
+    This was the crack: the schema previously rejected signed receipts because
+    additionalProperties=false blocked signature fields not listed in properties.
+    """
+    jsonschema = pytest.importorskip(
+        "jsonschema",
+        reason="jsonschema package required for schema conformance test",
+    )
+    import json
+    import pathlib
+
+    schema_path = pathlib.Path(__file__).parent.parent / "schemas" / "refusal-receipt.schema.json"
+    schema = json.loads(schema_path.read_text())
+
+    private_key, _ = ed25519_keypair
+    signed = sign_refusal_receipt(unsigned_refusal_receipt, private_key)
+
+    # Python validator accepts signed receipt
+    assert validate_refusal_receipt(signed) is True
+
+    # JSON Schema must also accept signed receipt (crack is now patched)
+    jsonschema.validate(instance=signed, schema=schema)
+
+    # Unsigned receipt must still validate against JSON Schema
+    jsonschema.validate(instance=unsigned_refusal_receipt, schema=schema)
+
+
+# ---------------------------------------------------------------------------
+# Bonus: public_key_id is preserved and optional
 # ---------------------------------------------------------------------------
 
 def test_sign_with_public_key_id(unsigned_refusal_receipt, ed25519_keypair):

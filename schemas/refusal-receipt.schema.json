@@ -71,6 +71,20 @@
     "does_not_bind_consequence": {
       "type": "boolean",
       "const": true
+    },
+    "signature": {
+      "type": "string",
+      "minLength": 1
+    },
+    "signature_algorithm": {
+      "type": "string",
+      "const": "Ed25519"
+    },
+    "public_key_id": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "minLength": 1}
+      ]
     }
   },
   "additionalProperties": false
