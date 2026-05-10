@@ -27,6 +27,7 @@ from receipt_chain_core import (  # noqa: E402
     evaluate,
     sha256_hex,
 )
+from receipt_chain_core.chain import REPLAY_SUPPRESS_THRESHOLD  # noqa: E402
 
 
 VECTORS_PATH = ROOT / "tests" / "adversarial" / "INVARIANT_TEST_VECTORS_v1.json"
@@ -135,6 +136,31 @@ def _v08(v: Dict[str, Any]) -> Dict[str, Any]:
     return {"id": v["id"], "pass": ok}
 
 
+def _v09(v: Dict[str, Any]) -> Dict[str, Any]:
+    """V09: replay suppression fires at REPLAY_SUPPRESS_THRESHOLD.
+
+    Seeds seed_count ALLOW receipts for seed_action, then evaluates
+    once more. Passes only if verdict and reason_code match expected.
+    """
+    chain = Chain()
+    action = v["seed_action"]
+    for i in range(v["seed_count"]):
+        evaluate(chain, proposed_action=action,
+                 decision_id=f"d-v09-seed-{i}", issued_at=ISSUED)
+    r, _ = evaluate(chain, proposed_action=action,
+                    decision_id="d-v09-test", issued_at=ISSUED)
+    ok = (
+        r.verdict.value == v["expected_verdict"]
+        and r.reason_code == v["expected_reason_code"]
+    )
+    return {
+        "id": v["id"],
+        "pass": ok,
+        "verdict": r.verdict.value,
+        "reason_code": r.reason_code,
+    }
+
+
 HANDLERS = {
     "V01_clean_chain_of_three_verifies_ok": _v01,
     "V02_mutation_breaks_chain": _v02,
@@ -144,6 +170,7 @@ HANDLERS = {
     "V06_unresolved_rebind_blocks_then_clears": _v06,
     "V07_replay_is_deterministic": _v07,
     "V08_boundary_declarations_present": _v08,
+    "V09_replay_suppression_fires_at_threshold": _v09,
 }
 
 

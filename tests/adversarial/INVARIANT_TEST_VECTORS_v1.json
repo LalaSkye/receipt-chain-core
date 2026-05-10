@@ -78,6 +78,14 @@
       "kind": "boundary_declaration",
       "expected_keys": ["does_not_execute", "does_not_bind_consequence"],
       "expected_values": [true, true]
+    },
+    {
+      "id": "V09_replay_suppression_fires_at_threshold",
+      "kind": "replay_suppression",
+      "seed_action": {"action_type": "send_email", "object_id": "msg-replay"},
+      "seed_count": 3,
+      "expected_verdict": "HOLD",
+      "expected_reason_code": "chain.replay_suppressed"
     }
   ]
 }

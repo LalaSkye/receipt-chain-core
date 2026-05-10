@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """run_demo.py — receipt-chain-core demonstration.
 
-Five scenarios, one summary line each. No dependencies beyond stdlib.
+Six scenarios, one summary line each. No dependencies beyond stdlib.
 """
 
 from __future__ import annotations
@@ -20,13 +20,14 @@ from receipt_chain_core import (  # noqa: E402
     Verdict,
     evaluate,
 )
+from receipt_chain_core.chain import REPLAY_SUPPRESS_THRESHOLD  # noqa: E402
 
 
 ISSUED = "2026-05-08T09:00:00Z"
 
 
 def _row(label: str, verdict: str, reason_code: str) -> str:
-    return f"  [{verdict:>16}]  {label:<28}  ({reason_code})"
+    return f"  [{verdict:>16}]  {label:<36}  ({reason_code})"
 
 
 def _scenario_clean() -> tuple[str, str, str]:
@@ -92,17 +93,35 @@ def _scenario_tampered() -> tuple[str, str, str]:
     return ("tampered chain", r.verdict.value, r.reason_code)
 
 
+def _scenario_replay_suppression() -> tuple[str, str, str]:
+    """Scenario 6: replay suppression fires at REPLAY_SUPPRESS_THRESHOLD.
+
+    Seeds exactly REPLAY_SUPPRESS_THRESHOLD ALLOW receipts for the same
+    action. The next evaluation sees replay_attempt_count == threshold
+    and returns HOLD / chain.replay_suppressed.
+    """
+    chain = Chain()
+    action = {"action_type": "send_email", "object_id": "msg-replay"}
+    for i in range(REPLAY_SUPPRESS_THRESHOLD):
+        evaluate(chain, proposed_action=action,
+                 decision_id=f"d-seed-{i}", issued_at=ISSUED)
+    r, _ = evaluate(chain, proposed_action=action,
+                    decision_id="d-suppressed", issued_at=ISSUED)
+    return ("replay suppression at threshold", r.verdict.value, r.reason_code)
+
+
 def main() -> int:
-    print("=" * 70)
+    print("=" * 74)
     print("  receipt-chain-core — demo (yesterday's receipt changes today's door)")
-    print("=" * 70)
+    print("=" * 74)
     print()
     expected = [
-        (_scenario_clean(),               "ALLOW"),
-        (_scenario_recent_refusal(),      "HOLD"),
-        (_scenario_unresolved_rebind(),   "REBIND_REQUIRED"),
-        (_scenario_rebind_clears(),       "ALLOW"),
-        (_scenario_tampered(),            "HOLD"),
+        (_scenario_clean(),                  "ALLOW"),
+        (_scenario_recent_refusal(),         "HOLD"),
+        (_scenario_unresolved_rebind(),      "REBIND_REQUIRED"),
+        (_scenario_rebind_clears(),          "ALLOW"),
+        (_scenario_tampered(),               "HOLD"),
+        (_scenario_replay_suppression(),     "HOLD"),
     ]
     all_match = True
     for (label, verdict, reason_code), expected_verdict in expected:
