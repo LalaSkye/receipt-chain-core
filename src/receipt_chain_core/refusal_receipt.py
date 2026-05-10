@@ -25,7 +25,13 @@ Does not prove:
 Signature fields (optional, v0.1):
     signature           — base64url-encoded Ed25519 signature over canonical signing body
     signature_algorithm — fixed value "Ed25519"
-    public_key_id       — optional caller-supplied key identifier string
+    public_key_id       — optional caller-supplied key identifier string (label only,
+                          not identity proof). Allowed only on signed receipts.
+
+Signature field rules:
+    unsigned receipt:  no signature, no signature_algorithm, no public_key_id
+    signed receipt:    signature + signature_algorithm required together
+    public_key_id:     allowed only when signature + signature_algorithm are present
 
 PRIMARY DESIGN RULE:
     Hash before signature.
@@ -34,6 +40,7 @@ PRIMARY DESIGN RULE:
 
 Dependency:
     cryptography (Ed25519 via hazmat.primitives.asymmetric.ed25519)
+    Declared as optional extra [signature] in pyproject.toml.
 """
 
 from __future__ import annotations
@@ -126,7 +133,13 @@ def validate_refusal_receipt(data: Mapping[str, Any]) -> bool:
     For signature, call verify_refusal_receipt_signature().
 
     Accepts both unsigned receipts (no signature fields) and signed receipts
-    (signature + signature_algorithm required together; public_key_id optional).
+    (signature + signature_algorithm required together; public_key_id allowed
+    only when both signature and signature_algorithm are present).
+
+    Signature field rules:
+        unsigned:     no signature, no signature_algorithm, no public_key_id
+        signed:       signature + signature_algorithm required together
+        public_key_id: allowed only on signed receipts (label only, not identity proof)
 
     Returns True for a valid shape.
     Raises ValueError for any structural violation.
@@ -195,14 +208,29 @@ def validate_refusal_receipt(data: Mapping[str, Any]) -> bool:
                 f"proposed_action.{key} must be a non-empty string"
             )
 
-    # Signature field consistency: if any signature field present, both
-    # signature and signature_algorithm must be present together.
+    # Signature field consistency rules:
+    #
+    # Rule 1: signature and signature_algorithm must both be present or both absent.
+    # Rule 2: public_key_id is only allowed when signature + signature_algorithm are present.
+    #
+    # This closes the public_key_id-alone shape gap:
+    # a receipt with public_key_id but no signature fields is rejected.
+    # public_key_id is a label, not identity proof.
     has_sig = "signature" in data
     has_alg = "signature_algorithm" in data
+    has_kid = "public_key_id" in data
+
+    if has_kid and not (has_sig and has_alg):
+        raise ValueError(
+            "public_key_id is only allowed on signed receipts: "
+            "signature and signature_algorithm must also be present"
+        )
+
     if has_sig != has_alg:
         raise ValueError(
             "signature and signature_algorithm must both be present or both absent"
         )
+
     if has_sig:
         if not isinstance(data["signature"], str) or not data["signature"]:
             raise ValueError("signature must be a non-empty string")
@@ -211,7 +239,7 @@ def validate_refusal_receipt(data: Mapping[str, Any]) -> bool:
                 f"signature_algorithm must be {_SIGNATURE_ALGORITHM!r}, "
                 f"got {data['signature_algorithm']!r}"
             )
-        if "public_key_id" in data:
+        if has_kid:
             pk_id = data["public_key_id"]
             if pk_id is not None and (not isinstance(pk_id, str) or not pk_id):
                 raise ValueError(
@@ -276,7 +304,8 @@ def sign_refusal_receipt(
     Args:
         data:          A valid, hash-verified refusal receipt dict (unsigned or signed).
         private_key:   An Ed25519PrivateKey instance from the cryptography library.
-        public_key_id: Optional caller-supplied key identifier string.
+        public_key_id: Optional caller-supplied key identifier string (label only,
+                       not identity proof).
 
     Returns:
         A new dict — original is not mutated — containing all original fields
