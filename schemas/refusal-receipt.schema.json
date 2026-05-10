@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "receipt_chain_core.refusal_receipt.v0.1",
   "title": "Refusal Receipt",
-  "description": "A typed projection of a refusal-class ChainedReceipt. Proves that a refusal happened, has a typed structure, is hash-bound, and can be validated. Does not prove cryptographic signature, legal admissibility, or production readiness.",
+  "description": "A typed projection of a refusal-class ChainedReceipt. Proves that a refusal happened, has a typed structure, is hash-bound, and can be validated. Optionally carries an Ed25519 signature over the canonical receipt body. Does not prove cryptographic identity, legal admissibility, or production readiness.",
   "type": "object",
   "required": [
     "schema",
@@ -71,6 +71,23 @@
     "does_not_bind_consequence": {
       "type": "boolean",
       "const": true
+    },
+    "signature": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Base64url-encoded Ed25519 signature over the canonical receipt body (all fields except signature, signature_algorithm, public_key_id). Present only on signed receipts."
+    },
+    "signature_algorithm": {
+      "type": "string",
+      "const": "Ed25519",
+      "description": "Optional. Fixed value 'Ed25519'. Must be present if and only if signature is present."
+    },
+    "public_key_id": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "minLength": 1}
+      ],
+      "description": "Optional caller-supplied key identifier. A label only — not cryptographically bound to the signing key. May be absent, null, or a non-empty string. Allowed only on signed receipts."
     }
   },
   "additionalProperties": false
