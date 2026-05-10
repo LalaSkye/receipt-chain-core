@@ -28,6 +28,11 @@ from receipt_chain_core import (  # noqa: E402
     sha256_hex,
 )
 from receipt_chain_core.chain import REPLAY_SUPPRESS_THRESHOLD  # noqa: E402
+from receipt_chain_core.refusal_receipt import (  # noqa: E402
+    to_refusal_receipt,
+    validate_refusal_receipt,
+    verify_refusal_receipt_hash,
+)
 
 
 VECTORS_PATH = ROOT / "tests" / "adversarial" / "INVARIANT_TEST_VECTORS_v1.json"
@@ -161,6 +166,72 @@ def _v09(v: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _v10(v: Dict[str, Any]) -> Dict[str, Any]:
+    """V10: refusal receipt hash-consistency check.
+
+    Projects a DENY ChainedReceipt as a typed refusal receipt.
+    Verifies shape and hash before mutation.
+    Mutates reason_code and confirms hash verification raises ValueError.
+    Shape validation may still pass after mutation — that is expected and
+    demonstrates the separation between shape and hash checks.
+
+    Passes only if all three expected conditions hold:
+    - shape valid before mutation
+    - hash valid before mutation
+    - hash verification raises ValueError after mutation
+    """
+    verdict_map = {"DENY": Verdict.DENY, "HOLD": Verdict.HOLD}
+    verdict = verdict_map[v["verdict"]]
+
+    deny_receipt = ChainedReceipt.build(
+        sequence=0,
+        prev_receipt_hash=None,
+        decision_id="d-v10",
+        proposed_action=v["seed_action"],
+        verdict=verdict,
+        reason_code="policy.deny",
+        reason="v10 test refusal",
+        issued_at=ISSUED,
+    )
+
+    projected = to_refusal_receipt(deny_receipt)
+
+    # Check shape valid before mutation
+    try:
+        shape_valid = validate_refusal_receipt(projected) is True
+    except ValueError:
+        shape_valid = False
+
+    # Check hash valid before mutation
+    try:
+        hash_valid_before = verify_refusal_receipt_hash(projected) is True
+    except ValueError:
+        hash_valid_before = False
+
+    # Mutate the field specified in the vector
+    projected[v["mutation"]["field"]] = v["mutation"]["value"]
+
+    # Hash verification must raise ValueError after mutation
+    hash_failure_after = False
+    try:
+        verify_refusal_receipt_hash(projected)
+    except ValueError:
+        hash_failure_after = True
+
+    ok = (
+        shape_valid == v["expected_shape_valid"]
+        and hash_valid_before == v["expected_hash_valid_before_mutation"]
+        and hash_failure_after == v["expected_hash_failure_after_mutation"]
+    )
+    return {
+        "id": v["id"],
+        "pass": ok,
+        "shape_valid": shape_valid,
+        "hash_valid_before_mutation": hash_valid_before,
+        "hash_failure_after_mutation": hash_failure_after,
+    }
+
+
 HANDLERS = {
     "V01_clean_chain_of_three_verifies_ok": _v01,
     "V02_mutation_breaks_chain": _v02,
@@ -171,6 +242,7 @@ HANDLERS = {
     "V07_replay_is_deterministic": _v07,
     "V08_boundary_declarations_present": _v08,
     "V09_replay_suppression_fires_at_threshold": _v09,
+    "V10_refusal_receipt_hash_consistency": _v10,
 }
 
 
