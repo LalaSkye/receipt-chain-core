@@ -113,6 +113,17 @@ ALL DEMO SCENARIOS PRODUCED EXPECTED VERDICTS
 
 ---
 
+## Proof pack
+
+For a reviewer-facing walkthrough of the demonstrated receipt-chain paths, see:
+
+[`docs/PROOF_PACK_v0.1.md`](docs/PROOF_PACK_v0.1.md)
+
+It shows the bounded proof condition, runnable commands, demonstrated verdict
+changes, receipt fields, and claim boundary.
+
+---
+
 ## Run tests and verifier
 
 ```bash
@@ -174,7 +185,8 @@ receipt-chain-core/
 │   ├── invariant.md
 │   ├── threat-model.md
 │   ├── chain-spec.md
-│   └── prior-state-projector.md
+│   ├── prior-state-projector.md
+│   └── PROOF_PACK_v0.1.md
 ├── src/
 │   └── receipt_chain_core/
 │       ├── __init__.py
