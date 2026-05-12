@@ -1,4 +1,4 @@
-# Enterprise Scenario Matrix v0.1
+# Enterprise-Shaped Scenario Matrix v0.1
 
 **Status:** PUBLIC_DEMO_MATRIX / NON_EXEC  
 **Scope:** Demonstrated paths only  
@@ -10,15 +10,17 @@
 
 This matrix widens the bridge demo without widening the claim beyond the evidence.
 
-It shows the same bounded control pattern across three enterprise-shaped action classes:
+It shows the same bounded local control pattern across three enterprise-shaped action classes:
 
 ```text
 prior receipt state
 → receipt-chain verdict
-→ commit boundary reached or not reached
-→ mutation true or false
+→ local commit-boundary adapter reached or not reached
+→ local demo mutation true or false
 → reason visible
 ```
+
+The action classes are representative labels for common enterprise consequence shapes. They are not live integrations.
 
 ---
 
@@ -26,9 +28,9 @@ prior receipt state
 
 | Class | Action type | Consequence shape |
 |---|---|---|
-| External communication | `send_email` | External message could leave the system |
+| External communication | `send_email` | Message could leave |
 | Access control | `grant_access` | Privilege could change |
-| Financial operation | `approve_payment` | Payment approval could bind |
+| Financial operation | `approve_payment` | Payment could bind |
 
 ---
 
@@ -48,9 +50,9 @@ ALL ENTERPRISE SCENARIOS PRODUCED EXPECTED RESULTS
 
 ## Demonstrated pattern
 
-For each action class, the demo shows two paths.
+For each enterprise-shaped action class, the demo shows two local paths.
 
-### Path A — prior refusal blocks before commit gate
+### Path A — prior refusal blocks before local commit adapter
 
 ```text
 prior receipt verdict: HOLD
@@ -60,7 +62,7 @@ commit_gate_reached: false
 mutation_performed: false
 ```
 
-### Path B — clean chain permits commit-gate evaluation
+### Path B — clean chain permits local commit-adapter evaluation
 
 ```text
 receipt-chain verdict: ALLOW
@@ -76,9 +78,9 @@ mutation_performed: true
 
 | Action type | Prior refusal path | Clean authority path |
 |---|---|---|
-| `send_email` | blocks before gate | reaches gate and mutates |
-| `grant_access` | blocks before gate | reaches gate and mutates |
-| `approve_payment` | blocks before gate | reaches gate and mutates |
+| `send_email` | blocks before adapter | reaches adapter |
+| `grant_access` | blocks before adapter | reaches adapter |
+| `approve_payment` | blocks before adapter | reaches adapter |
 
 ---
 
@@ -86,11 +88,11 @@ mutation_performed: true
 
 This demo shows, on the demonstrated paths only:
 
-- receipt-chain state can block later continuation before a commit boundary is reached
-- a clean receipt-chain state can permit commit-boundary evaluation
-- the same pattern can be demonstrated across multiple enterprise-shaped consequence classes
-- mutation remains false when the receipt chain blocks the path
-- mutation becomes true only on the clean-chain plus valid-authority path inside the local demo adapter
+- receipt-chain state can block later continuation before a local commit-boundary adapter is reached
+- a clean receipt-chain state can permit local commit-adapter evaluation
+- the same reachability pattern can be demonstrated across multiple enterprise-shaped consequence classes
+- local demo mutation remains false when the receipt chain blocks the path
+- local demo mutation becomes true only on the clean-chain plus valid-authority path inside the local demo adapter
 
 ---
 
@@ -109,6 +111,8 @@ This demo does not prove:
 - atomic commit
 - payload binding
 - production integration with `commit-gate-core`
+
+The demo does not send email, change access, approve payment, or touch external systems.
 
 ---
 
